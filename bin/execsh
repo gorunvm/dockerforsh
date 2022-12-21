@@ -1,0 +1,25 @@
+#!/bin/bash
+bindir=$(dirname $0)
+source $bindir/pub.fun
+
+if [ $1 = "create_net" ]
+then
+    createNet $2
+    exec unshare -n $bindir/execsh bind_net $2 $3 $4 CONTAINER_NAME=$2
+
+fi
+
+if [ $1 = "bind_net" ]
+then
+    bindNet $2 $3
+    exec unshare -m -i -u $bindir/execsh ch_root $2 $4
+fi
+
+if [ $1 = "ch_root" ]
+then
+    bindVolume $2
+    changeRoot $2
+    mountProc
+    exec ${3}
+
+fi

@@ -1,0 +1,96 @@
+#!/bin/bash
+bindir=$(dirname $0)
+source $bindir/pub.fun
+
+if [ $1 = "run" ]
+then
+    cname=$3
+    cip=$4
+    imgname=$5
+    shstr=$6
+fi
+
+if [ $1 = "init" ]
+then
+    mkdir -p $basedir/log
+    mkdir -p $basedir/pid
+    mkdir -p $basedir/cip/ipmap
+    mkdir -p $basedir/cip/iplist
+    mkdir -p $overlaydir/busybox
+    docker run --rm -id --name busybox busybox && docker export busybox -o $overlaydir/busybox.tar && docker rm -f busybox
+    tar -xf $overlaydir/busybox.tar -C $overlaydir/busybox
+
+    go build -o $overlaydir/hello/bin/hello $basedir/project/hello/hello.go
+
+    apt install -y bridge-utils
+    ip link set dockersh down
+    brctl delbr dockersh
+    brctl addbr dockersh
+    brctl show
+    ip link set dockersh up
+    save_cip "dockersh_br_ip" $2
+    ip addr add $2/24 dev dockersh
+fi
+
+if [ $1 = "run" ] && [ $2 = "-it" ]
+then
+    function exit_handler(){
+        removeOverlay $cname
+        clearNet $cname
+    }
+    trap 'exit_handler' EXIT
+    have_cpid $cname $cip
+    save_cip $cname $cip
+    createOverlay $cname $imgname
+    unshare -p -f $bindir/execsh create_net $cname $cip $shstr
+fi
+
+if [ $1 = "run" ] && [ $2 = "-d" ]
+then
+    have_cpid $cname $cip
+    save_cip $cname $cip
+    createOverlay $cname $imgname
+    exec unshare -p -f $bindir/execsh create_net $cname $cip $shstr > $basedir/log/$cname.log 2>&1 &
+fi
+
+if [ $1 = "ps" ]
+then
+   ls -l $basedir/pid/ | grep rw |awk '{print $9}'
+fi
+
+if [ $1 = "exec" ]
+then
+    tcpid=$2
+    file=$basedir/pid/$2
+    if [ -f "$file" ]
+    then
+	tcpid=`cat $file`
+    fi
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin 
+    nsenter -t $tcpid -u -i -n -m -p /bin/sh
+fi
+
+if [ $1 = "stop" ]
+then
+    file=$basedir/pid/$2
+    if [ -f "$file" ]
+    then
+        cat $file | xargs kill 
+	rm -rf $file
+    fi
+
+    imfile=$basedir/cip/ipmap/$2
+    if [ -f "$imfile" ]
+    then
+        mcip=`cat $imfile`
+	rm -rf $imfile
+        ilfile=$basedir/cip/iplist/$mcip
+        if [ -f "$ilfile" ]
+        then
+            rm -rf $ilfile
+        fi
+    fi
+    removeOverlay $2
+    clearNet $2
+fi
+
